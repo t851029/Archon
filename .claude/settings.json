@@ -1,0 +1,230 @@
+{
+  "parallelTasksCount": 4,
+  "defaultModel": "sonnet",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/auto-format.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Edit"],
+          "file_paths": ["package.json", "apps/web/package.json", "packages/*/package.json"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '📦 Detected package.json changes - running pnpm install...' && pnpm install && echo '✅ Dependencies synchronized successfully' || (echo '❌ Failed to install dependencies - manual intervention required' && exit 2)"
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Edit"],
+          "file_paths": ["pyproject.toml", "poetry.lock"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🐍 Detected Python package changes - running poetry install...' && poetry install && echo '✅ Python dependencies synchronized successfully' || (echo '❌ Failed to install Python dependencies - manual intervention required' && exit 2)"
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Bash"],
+          "command_patterns": ["git merge*", "git pull*", "git checkout*"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CHANGED_PACKAGES=$(git diff --name-only HEAD~1 HEAD | grep -E '(package\\.json|pyproject\\.toml)' || echo '') && if [ ! -z \"$CHANGED_PACKAGES\" ]; then echo '🔄 Git operation detected package changes in: '$CHANGED_PACKAGES && echo '📦 Running dependency synchronization...' && if echo \"$CHANGED_PACKAGES\" | grep -q 'package.json'; then echo 'Installing pnpm dependencies...' && pnpm install; fi && if echo \"$CHANGED_PACKAGES\" | grep -q 'pyproject.toml'; then echo 'Installing Poetry dependencies...' && poetry install; fi && echo '✅ Dependencies synchronized after git operation'; else echo 'ℹ️  No package file changes detected in recent git operation'; fi"
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Edit"],
+          "file_paths": ["supabase/migrations/*.sql"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🗄️  Detected Supabase migration changes - regenerating types...' && pnpm types && echo '✅ Supabase types regenerated successfully' || (echo '❌ Failed to regenerate Supabase types - check if Supabase is running' && exit 2)"
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Write"],
+          "file_paths": ["supabase/migrations/*.sql"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🚨 MIGRATION SAFETY REMINDER:' && echo '1. ✅ Test migration locally first: npx supabase db push' && echo '2. ✅ Apply to staging: npx supabase link --project-ref fwdfewruzeaplmcezyne && npx supabase db push --linked' && echo '3. ✅ Apply to production: npx supabase link --project-ref zunxilwvjbpkhzrbaxmk && npx supabase db push --linked' && echo '4. ✅ Regenerate types: pnpm types' && echo '5. ✅ Verify all environments: curl health endpoints' && echo '📖 See CLAUDE.md Database Migration Management section for full checklist'"
+          },
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "A new database migration was created. Please verify the migration follows best practices and suggest validation steps.",
+            "timeout": 45
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": {
+          "tools": ["Bash"],
+          "command_patterns": ["*dev:full*", "*pnpm dev*"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🔍 Validating development environment...' && if [ ! -d 'node_modules' ]; then echo '⚠️  node_modules not found - installing dependencies...' && pnpm install; fi && if ! poetry show >/dev/null 2>&1; then echo '⚠️  Poetry dependencies not found - installing...' && poetry install; fi && echo '✅ Development environment validated'"
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Bash"],
+          "command_patterns": ["*deploy*", "*staging*", "*production*"]
+        },
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "A deployment-related command is about to run: {{command}}. Please validate the environment and check for common deployment issues before proceeding.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tools": ["Bash"],
+          "command_patterns": ["*docker-compose up*", "*docker*"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🐳 Docker operation detected - checking for port conflicts...' && (./scripts/dev-with-ports.sh > /tmp/port_check.log 2>&1 && echo '✅ Ports available' || (echo '⚠️ Port conflicts detected - see /tmp/port_check.log' && cat /tmp/port_check.log))"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*create.*prp.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/validate-prp.py",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": ".*(code review|review.*code|review.*changes|review.*staged).*",
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "code-reviewer",
+            "prompt": "Please perform a comprehensive code review. {{user_message}}",
+            "timeout": 90
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/play-notification.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/smart-commit.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "ToolErrored": [
+      {
+        "matcher": {
+          "error_patterns": ["Port.*already in use", "EADDRINUSE", "Address already in use"]
+        },
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "A port conflict error was detected: {{error_message}}. Please help resolve this port conflict issue.",
+            "timeout": 45
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "error_patterns": ["JWSError", "Not valid base64url", "Invalid.*JWT", "JWT.*expired"]
+        },
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "A JWT token error was detected: {{error_message}}. Please help validate and fix the JWT token format.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "error_patterns": ["CORS.*origin", "Disallowed CORS origin", "Access-Control-Allow-Origin"]
+        },
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "A CORS error was detected: {{error_message}}. Please help debug this CORS configuration issue.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "error_patterns": ["Environment variable.*not found", "Invalid environment variables", "Missing.*environment"]
+        },
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "An environment variable error was detected: {{error_message}}. Please help sync and validate environment variables.",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "error_patterns": ["Container.*not.*running", "Docker.*error", "pnpm.*docker.*failed"]
+        },
+        "hooks": [
+          {
+            "type": "agent",
+            "agent": "devops-helper",
+            "prompt": "A Docker error was detected: {{error_message}}. Please help troubleshoot this Docker issue.",
+            "timeout": 45
+          }
+        ]
+      }
+    ]
+  }
+}
